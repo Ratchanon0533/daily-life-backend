@@ -5,8 +5,8 @@ const mysql = require("mysql2");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+// const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+// const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
@@ -59,14 +59,14 @@ const s3 = new S3Client({
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || req.headers['Authorization'];
   console.log('Authorization header:', auth);
-  
+
   if (!auth) {
     return res.status(401).json({ message: 'Invalid token - no Authorization header' });
   }
 
   const parts = auth.trim().split(/\s+/);
   console.log('Authorization parts:', parts);
-  
+
   if (parts.length !== 2 || !/^Bearer$/i.test(parts[0])) {
     return res.status(401).json({ message: 'Invalid token - bad format' });
   }
@@ -276,7 +276,7 @@ app.post("/login/organizers", (req, res) => {
     }
 
     const user = rows[0];
-    
+
     if (password !== user.password) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
@@ -888,7 +888,7 @@ app.get("/event/organizer/:organizerId", (req, res) => {
 app.get("/getall/event/:id", (req, res) => {
   const { id } = req.params;
   const sql = "SELECT * FROM event WHERE organizer_id = ?";
-  
+
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error("Error fetching event:", err);
@@ -1794,32 +1794,34 @@ app.post("/s3/presign", verifyToken, async (req, res) => {
 });
 
 // Direct S3 upload for event photos
-app.post('/s3/upload', verifyToken, upload.single('image'), async (req, res) => {
+app.post('/upload/event-photo', verifyToken, upload.single('image'), (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    // Multer handles the 'no file' and 'disk saving' part
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
 
     const file = req.file;
+
+    // Validate MimeType (though you can also do this inside multer's fileFilter)
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowed.includes(file.mimetype)) {
       return res.status(400).json({ message: 'Invalid file type' });
     }
 
-    const key = `daily-life-event-photo/${Date.now()}-${uuidv4()}-${file.originalname.replace(/\s+/g,'_')}`;
+    // Construct the URL to access the file via browser
+    // Replace 'yourdomain.com' with your actual domain or use req.get('host')
+    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/events/${file.filename}`;
 
-    const command = new PutObjectCommand({
-      Bucket: process.env.AWS_S3_BUCKET_NAME,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype
+    return res.json({
+      success: true,
+      message: 'File uploaded to cPanel storage',
+      imageUrl: imageUrl
     });
 
-    await s3.send(command);
-
-    const imageUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.amazonaws.com/${key}`;
-    return res.json({ imageUrl });
   } catch (err) {
-    console.error('S3 upload error:', err);
-    return res.status(500).json({ message: 'Failed to upload file', error: err });
+    console.error('CPanel upload error:', err);
+    return res.status(500).json({ message: 'Failed to save file', error: err.message });
   }
 });
 
@@ -1834,7 +1836,7 @@ app.post('/s3/transcript', verifyToken, upload.single('image'), async (req, res)
       return res.status(400).json({ message: 'Invalid file type' });
     }
 
-    const key = `Transcript/${Date.now()}-${uuidv4()}-${file.originalname.replace(/\s+/g,'_')}`;
+    const key = `Transcript/${Date.now()}-${uuidv4()}-${file.originalname.replace(/\s+/g, '_')}`;
 
     const command = new PutObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -1897,3 +1899,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
 });
+
+const multer = require("multer");
+const Client = require("ssh2-sftp-client"); // Add this
+// Remove the @aws-sdk lines if you aren't using S3 anymore
