@@ -25,11 +25,11 @@ const ALLOWED_TYPES = ["UNIVERSITY", "ORGANIZER"];
 
 // ========== DATABASE CONNECTION ==========
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "daily-life-demo-1.cfwiseyse6is.ap-southeast-2.rds.amazonaws.com",
-  user: process.env.DB_USER || "admin",
-  password: process.env.DB_PASSWORD || "awd486S5!qq",
-  database: process.env.DB_NAME || "Daily_Life_DB",
-  port: process.env.DB_PORT || "3306",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
   ssl: { rejectUnauthorized: false },
   waitForConnections: true,
   connectionLimit: 10,
