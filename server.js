@@ -16,18 +16,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // ================= UPLOAD FOLDERS =================
 const uploadDirs = {
-  profile: path.join(__dirname, 'public/uploads/profile'),
-  transcript: path.join(__dirname, 'public/uploads/transcript'),
-  certificates: path.join(__dirname, 'public/uploads/certificates'),
-  event: path.join(__dirname, 'public/uploads/event')
+  profile: path.join(__dirname, 'public_html/uploads/profile'),
+  transcript: path.join(__dirname, 'public_html/uploads/transcript'),
+  certificates: path.join(__dirname, 'public_html/uploads/certificate'),
+  event: path.join(__dirname, 'public_html/uploads/event-photo')
 };
 
 // สร้างโฟลเดอร์หากยังไม่มี
-Object.values(uploadDirs).forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-});
+// Object.values(uploadDirs).forEach(dir => {
+//   if (!fs.existsSync(dir)) {
+//     fs.mkdirSync(dir, { recursive: true });
+//   }
+// });
 
 // ================= MULTER STORAGE CONFIG =================
 const storage = multer.diskStorage({
@@ -40,9 +40,9 @@ const storage = multer.diskStorage({
     } else if (file.fieldname === 'transcript') {
       uploadDir = uploadDirs.transcript;
     } else if (file.fieldname === 'certificate') {
-      uploadDir = uploadDirs.certificates;
+      uploadDir = uploadDirs.certificate;
     } else if (file.fieldname === 'image') {
-      uploadDir = uploadDirs.event;
+      uploadDir = uploadDirs.event-photo;
     }
 
     cb(null, uploadDir);
@@ -72,7 +72,7 @@ const upload = multer({
 
 // ================= STATIC FILES =================
 // เสิร์ฟไฟล์ static
-app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'public_html/uploads')));
 
 const SALT_ROUNDS = 10;
 const ALLOWED_TYPES = ["UNIVERSITY", "ORGANIZER"];
