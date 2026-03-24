@@ -1810,7 +1810,8 @@ app.post('/upload/event-image', verifyToken, upload.single('image'), async (req,
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    const imageUrl = uploadFileLocal(req.file, 'event');
+    
+    const imageUrl = await uploadFileLocal(req.file, 'event');
     return res.json({ imageUrl });
   } catch (err) {
     console.error('Upload error:', err);
