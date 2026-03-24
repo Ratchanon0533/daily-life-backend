@@ -26,14 +26,13 @@ const db = mysql.createConnection({
   user: "zemrmpsz",
   password: "Etdit11@pim",
   database: "zemrmpsz_dailylifes",
-  // ssl: { rejectUnauthorized: false },
+  port: 3306,
+  ssl: { rejectUnauthorized: false },
   // waitForConnections: true,
   // connectionLimit: 10,
   // queueLimit: 0,
   // connectTimeout: 15000 
-  authPlugins: {
-    mysql_clear_password: () => () => Buffer.from("Etdit11@pim")
-  }
+
 });
 
 db.connect(err => {
