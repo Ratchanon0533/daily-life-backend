@@ -15,18 +15,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 
-Object.values(uploadDirs).forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-});
+
 
 // ================= UPLOAD FOLDERS =================
 const uploadDirs = {
-  profile: path.join(__dirname, '../public_html/uploads/profile'),
-  transcript: path.join(__dirname, '../public_html/uploads/transcript'),
-  certificate: path.join(__dirname, '../public_html/uploads/certificate'),
-  eventphoto: path.join(__dirname, '../public_html/uploads/eventphoto')
+  profile: path.join(__dirname, 'public_html/uploads/profile'),
+  transcript: path.join(__dirname, 'public_html/uploads/transcript'),
+  certificate: path.join(__dirname, 'public_html/uploads/certificate'),
+  eventphoto: path.join(__dirname, 'public_html/uploads/eventphoto')
 };
 
 
