@@ -42,7 +42,7 @@ const storage = multer.diskStorage({
     } else if (file.fieldname === 'certificate') {
       uploadDir = uploadDirs.certificate;
     } else if (file.fieldname === 'image') {
-      uploadDir = uploadDirs.event-photo;
+      uploadDir = uploadDirs.event;
     }
 
     cb(null, uploadDir);
