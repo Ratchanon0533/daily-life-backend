@@ -19,7 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // ================= UPLOAD FOLDERS =================
 const uploadDirs = {
-  profile: path.join(__dirname, 'public_html/uploads/profile'),
+  profile: path.join(__dirname, '../public_html/uploads/profile'),
   transcript: path.join(__dirname, 'public_html/uploads/transcript'),
   certificate: path.join(__dirname, 'public_html/uploads/certificate'),
   eventphoto: path.join(__dirname, 'public_html/uploads/eventphoto')
@@ -115,14 +115,14 @@ const uploadFileLocal = (file, folder) => {
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || req.headers['Authorization'];
   console.log('Authorization header:', auth);
-  
+
   if (!auth) {
     return res.status(401).json({ message: 'Invalid token - no Authorization header' });
   }
 
   const parts = auth.trim().split(/\s+/);
   console.log('Authorization parts:', parts);
-  
+
   if (parts.length !== 2 || !/^Bearer$/i.test(parts[0])) {
     return res.status(401).json({ message: 'Invalid token - bad format' });
   }
@@ -310,7 +310,7 @@ app.post("/login/organizers", (req, res) => {
     }
 
     const user = rows[0];
-    
+
     if (password !== user.password) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
@@ -922,7 +922,7 @@ app.get("/event/organizer/:organizerId", (req, res) => {
 app.get("/getall/event/:id", (req, res) => {
   const { id } = req.params;
   const sql = "SELECT * FROM event WHERE organizer_id = ?";
-  
+
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error("Error fetching event:", err);
@@ -1080,7 +1080,7 @@ app.put("/event/edit/:id", upload.single('image'), (req, res) => {
     WHERE id = ?
   `;
 
-  const params = image 
+  const params = image
     ? [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, image, organizer_id || null, organizer_name || null, id]
     : [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, organizer_id || null, organizer_name || null, id];
 
@@ -1426,219 +1426,244 @@ app.get("/tables/size/all", (req, res) => {
 });
 
 // ========== PORTFOLIO ENDPOINTS ==========
+// ใน server.js
+app.post('/createport', verifyToken, upload.single('profile_image'), async (req, res) => {
+  try {
+    const { portfolio_name } = req.body;
+    const userId = req.user.id;
+
+    let imagePath = null;
+
+    // ถ้ามีการอัปโหลดไฟล์ (Multer จะจัดการเซฟลงโฟลเดอร์ให้เอง)
+    if (req.file) {
+      // เก็บเฉพาะ "Path หรือชื่อไฟล์" เพื่อเอาไปใส่ใน DB
+      imagePath = `/uploads/profile/${req.file.filename}`;
+    }
+
+    // บันทึกลง Database (เก็บแค่ตัวอักษร Path ไม่ใช่ตัวไฟล์)
+    const sql = "UPDATE personal_info SET portfolio_name = ?, profile_url = ? WHERE user_id = ?";
+    db.query(sql, [portfolio_name, imagePath, userId], (err, result) => {
+      if (err) return res.status(500).json(err);
+      res.json({ message: "บันทึกสำเร็จ", path: imagePath });
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: "Unexpected field หรือ Error อื่นๆ", error: error.message });
+  }
+});
 
 // ================= CREATE PORTFOLIO =================
 
-app.post(
-  "/createport",
-  verifyToken,
-  upload.fields([
-    { name: 'profile', maxCount: 1 },
-    { name: 'transcript', maxCount: 1 },
-    { name: 'certificate', maxCount: 20 }
-  ]),
-  async (req, res) => {
+// app.post(
+//   "/createport",
+//   verifyToken,
+//   upload.fields([
+//     { name: 'profile', maxCount: 1 },
+//     { name: 'transcript', maxCount: 1 },
+//     { name: 'certificate', maxCount: 20 }
+//   ]),
+//   async (req, res) => {
 
-    const connection = await db.promise().getConnection();
+//     const connection = await db.promise().getConnection();
 
-    try {
-      await connection.beginTransaction();
+//     try {
+//       await connection.beginTransaction();
 
-      // Parse JSON
-      let parsedBody = req.body;
-      if (typeof req.body.data === 'string') {
-        parsedBody = JSON.parse(req.body.data);
-      }
+//       // Parse JSON
+//       let parsedBody = req.body;
+//       if (typeof req.body.data === 'string') {
+//         parsedBody = JSON.parse(req.body.data);
+//       }
 
-      const {
-        user_id,
-        port_id,
-        personal_info,
-        educational,
-        skills_abilities,
-        activities_certificates,
-        university_choice
-      } = parsedBody;
+//       const {
+//         user_id,
+//         port_id,
+//         personal_info,
+//         educational,
+//         skills_abilities,
+//         activities_certificates,
+//         university_choice
+//       } = parsedBody;
 
-      if (!user_id || !port_id) {
-        return res.status(400).json({ success: false, message: "user_id และ port_id จำเป็นต้องมี" });
-      }
+//       if (!user_id || !port_id) {
+//         return res.status(400).json({ success: false, message: "user_id และ port_id จำเป็นต้องมี" });
+//       }
 
-      // ================= Upload Files =================
+//       // ================= Upload Files =================
 
-      let profileUrl = null;
-      if (req.files?.profile?.[0]) {
-        profileUrl = uploadFileLocal(req.files.profile[0], 'profile');
-      }
+//       let profileUrl = null;
+//       if (req.files?.profile?.[0]) {
+//         profileUrl = uploadFileLocal(req.files.profile[0], 'profile');
+//       }
 
-      let transcriptUrl = null;
-      if (req.files?.transcript?.[0]) {
-        transcriptUrl = uploadFileLocal(req.files.transcript[0], 'transcript');
-      }
+//       let transcriptUrl = null;
+//       if (req.files?.transcript?.[0]) {
+//         transcriptUrl = uploadFileLocal(req.files.transcript[0], 'transcript');
+//       }
 
-      let certificateUrls = [];
-      if (req.files?.certificate?.length) {
-        for (const file of req.files.certificate) {
-          const url = uploadFileLocal(file, 'certificates');
-          certificateUrls.push(url);
-        }
-      }
+//       let certificateUrls = [];
+//       if (req.files?.certificate?.length) {
+//         for (const file of req.files.certificate) {
+//           const url = uploadFileLocal(file, 'certificates');
+//           certificateUrls.push(url);
+//         }
+//       }
 
-      // ================= Insert portfolios =================
+//       // ================= Insert portfolios =================
 
-      await connection.query(
-        `INSERT INTO portfolios (user_id, port_id, profile_url)
-         VALUES (?, ?, ?)`,
-        [user_id, port_id, profileUrl]
-      );
+//       await connection.query(
+//         `INSERT INTO portfolios (user_id, port_id, profile_url)
+//          VALUES (?, ?, ?)`,
+//         [user_id, port_id, profileUrl]
+//       );
 
-      // ================= personal_info =================
+//       // ================= personal_info =================
 
-      if (personal_info) {
-        await connection.query(
-          `INSERT INTO personal_info
-          (port_id, portfolio_name, introduce, prefix, first_name, last_name, date_birth,
-           nationality, national_id, phone_number1, phone_number2, email, address,
-           province, district, subdistrict, postal_code)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            port_id,
-            personal_info.portfolio_name || null,
-            personal_info.introduce || null,
-            personal_info.prefix || null,
-            personal_info.first_name || null,
-            personal_info.last_name || null,
-            personal_info.date_birth || null,
-            personal_info.nationality || null,
-            personal_info.national_id || null,
-            personal_info.phone_number1 || null,
-            personal_info.phone_number2 || null,
-            personal_info.email || null,
-            personal_info.address || null,
-            personal_info.province || null,
-            personal_info.district || null,
-            personal_info.subdistrict || null,
-            personal_info.postal_code || null
-          ]
-        );
-      }
+//       if (personal_info) {
+//         await connection.query(
+//           `INSERT INTO personal_info
+//           (port_id, portfolio_name, introduce, prefix, first_name, last_name, date_birth,
+//            nationality, national_id, phone_number1, phone_number2, email, address,
+//            province, district, subdistrict, postal_code)
+//           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//           [
+//             port_id,
+//             personal_info.portfolio_name || null,
+//             personal_info.introduce || null,
+//             personal_info.prefix || null,
+//             personal_info.first_name || null,
+//             personal_info.last_name || null,
+//             personal_info.date_birth || null,
+//             personal_info.nationality || null,
+//             personal_info.national_id || null,
+//             personal_info.phone_number1 || null,
+//             personal_info.phone_number2 || null,
+//             personal_info.email || null,
+//             personal_info.address || null,
+//             personal_info.province || null,
+//             personal_info.district || null,
+//             personal_info.subdistrict || null,
+//             personal_info.postal_code || null
+//           ]
+//         );
+//       }
 
-      // ================= educational =================
+//       // ================= educational =================
 
-      if (Array.isArray(educational)) {
-        for (const edu of educational) {
-          await connection.query(
-            `INSERT INTO educational
-            (port_id, number, school, graduation, educational_qualifications,
-             province, district, study_path, grade_average, study_results)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              port_id,
-              edu.number || null,
-              edu.school || null,
-              edu.graduation || null,
-              edu.educational_qualifications || null,
-              edu.province || null,
-              edu.district || null,
-              edu.study_path || null,
-              edu.grade_average || null,
-              transcriptUrl || null
-            ]
-          );
-        }
-      }
+//       if (Array.isArray(educational)) {
+//         for (const edu of educational) {
+//           await connection.query(
+//             `INSERT INTO educational
+//             (port_id, number, school, graduation, educational_qualifications,
+//              province, district, study_path, grade_average, study_results)
+//             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//             [
+//               port_id,
+//               edu.number || null,
+//               edu.school || null,
+//               edu.graduation || null,
+//               edu.educational_qualifications || null,
+//               edu.province || null,
+//               edu.district || null,
+//               edu.study_path || null,
+//               edu.grade_average || null,
+//               transcriptUrl || null
+//             ]
+//           );
+//         }
+//       }
 
-      // ================= skills_abilities =================
+//       // ================= skills_abilities =================
 
-      if (skills_abilities) {
-        const [skillRes] = await connection.query(
-          `INSERT INTO skills_abilities (port_id, details)
-           VALUES (?, ?)`,
-          [port_id, skills_abilities.details || null]
-        );
+//       if (skills_abilities) {
+//         const [skillRes] = await connection.query(
+//           `INSERT INTO skills_abilities (port_id, details)
+//            VALUES (?, ?)`,
+//           [port_id, skills_abilities.details || null]
+//         );
 
-        const skillsId = skillRes.insertId;
+//         const skillsId = skillRes.insertId;
 
-        if (Array.isArray(skills_abilities.language_skills)) {
-          for (const lang of skills_abilities.language_skills) {
-            await connection.query(
-              `INSERT INTO language_skills
-               (port_id, skills_abilities_id, language, listening, speaking, reading, writing)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [
-                port_id,
-                skillsId,
-                lang.language || null,
-                lang.listening || null,
-                lang.speaking || null,
-                lang.reading || null,
-                lang.writing || null
-              ]
-            );
-          }
-        }
-      }
+//         if (Array.isArray(skills_abilities.language_skills)) {
+//           for (const lang of skills_abilities.language_skills) {
+//             await connection.query(
+//               `INSERT INTO language_skills
+//                (port_id, skills_abilities_id, language, listening, speaking, reading, writing)
+//                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+//               [
+//                 port_id,
+//                 skillsId,
+//                 lang.language || null,
+//                 lang.listening || null,
+//                 lang.speaking || null,
+//                 lang.reading || null,
+//                 lang.writing || null
+//               ]
+//             );
+//           }
+//         }
+//       }
 
-      // ================= activities_certificates (JSON) =================
+//       // ================= activities_certificates (JSON) =================
 
-      if (Array.isArray(activities_certificates)) {
-        for (const activity of activities_certificates) {
-          await connection.query(
-            `INSERT INTO activities_certificates
-             (port_id, number, name_project, date, photo, details)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              port_id,
-              activity.number || null,
-              activity.name_project || null,
-              activity.date || null,
-              JSON.stringify(certificateUrls),
-              activity.details || null
-            ]
-          );
-        }
-      }
+//       if (Array.isArray(activities_certificates)) {
+//         for (const activity of activities_certificates) {
+//           await connection.query(
+//             `INSERT INTO activities_certificates
+//              (port_id, number, name_project, date, photo, details)
+//              VALUES (?, ?, ?, ?, ?, ?)`,
+//             [
+//               port_id,
+//               activity.number || null,
+//               activity.name_project || null,
+//               activity.date || null,
+//               JSON.stringify(certificateUrls),
+//               activity.details || null
+//             ]
+//           );
+//         }
+//       }
 
-      // ================= university_choice =================
+//       // ================= university_choice =================
 
-      if (Array.isArray(university_choice)) {
-        for (const uni of university_choice) {
-          await connection.query(
-            `INSERT INTO university_choice
-             (port_id, university, faculty, major, details)
-             VALUES (?, ?, ?, ?, ?)`,
-            [
-              port_id,
-              uni.university || null,
-              uni.faculty || null,
-              uni.major || null,
-              uni.details || null
-            ]
-          );
-        }
-      }
+//       if (Array.isArray(university_choice)) {
+//         for (const uni of university_choice) {
+//           await connection.query(
+//             `INSERT INTO university_choice
+//              (port_id, university, faculty, major, details)
+//              VALUES (?, ?, ?, ?, ?)`,
+//             [
+//               port_id,
+//               uni.university || null,
+//               uni.faculty || null,
+//               uni.major || null,
+//               uni.details || null
+//             ]
+//           );
+//         }
+//       }
 
-      await connection.commit();
+//       await connection.commit();
 
-      return res.json({
-        success: true,
-        message: "สร้าง Portfolio สำเร็จ",
-        uploaded: {
-          profile: profileUrl,
-          transcript: transcriptUrl,
-          certificates: certificateUrls
-        }
-      });
+//       return res.json({
+//         success: true,
+//         message: "สร้าง Portfolio สำเร็จ",
+//         uploaded: {
+//           profile: profileUrl,
+//           transcript: transcriptUrl,
+//           certificates: certificateUrls
+//         }
+//       });
 
-    } catch (err) {
-      await connection.rollback();
-      console.error("Create Portfolio Error:", err);
-      return res.status(500).json({ success: false, error: err.message });
-    } finally {
-      connection.release();
-    }
-  }
-);
+//     } catch (err) {
+//       await connection.rollback();
+//       console.error("Create Portfolio Error:", err);
+//       return res.status(500).json({ success: false, error: err.message });
+//     } finally {
+//       connection.release();
+//     }
+//   }
+// );
 
 
 // ===== Get all data portfolio =======
@@ -1807,7 +1832,7 @@ app.post('/upload/event-image', verifyToken, upload.single('image'), async (req,
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    
+
     const imageUrl = await uploadFileLocal(req.file, 'event');
     return res.json({ imageUrl });
   } catch (err) {
