@@ -18,8 +18,8 @@ app.use(express.urlencoded({ extended: true }));
 const uploadDirs = {
   profile: path.join(__dirname, 'public_html/uploads/profile'),
   transcript: path.join(__dirname, 'public_html/uploads/transcript'),
-  certificates: path.join(__dirname, 'public_html/uploads/certificate'),
-  event: path.join(__dirname, 'public_html/uploads/event-photo')
+  certificate: path.join(__dirname, 'public_html/uploads/certificate'),
+  eventphoto: path.join(__dirname, 'public_html/uploads/eventphoto')
 };
 
 // สร้างโฟลเดอร์หากยังไม่มี
@@ -42,7 +42,7 @@ const storage = multer.diskStorage({
     } else if (file.fieldname === 'certificate') {
       uploadDir = uploadDirs.certificate;
     } else if (file.fieldname === 'image') {
-      uploadDir = uploadDirs.event;
+      uploadDir = uploadDirs.eventphoto;
     }
 
     cb(null, uploadDir);
