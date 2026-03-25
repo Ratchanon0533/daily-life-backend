@@ -28,28 +28,28 @@ const uploadDirs = {
 
 // ================= MULTER STORAGE CONFIG =================
 const storage = multer.memoryStorage({
-  destination: (req, file, cb) => {
-    // กำหนดโฟลเดอร์ตามชื่อ field
-    let uploadDir = uploadDirs.profile; // default
+  // destination: (req, file, cb) => {
+  //   // กำหนดโฟลเดอร์ตามชื่อ field
+  //   let uploadDir = uploadDirs.profile; // default
 
-    if (file.fieldname === 'profile') {
-      uploadDir = uploadDirs.profile;
-    } else if (file.fieldname === 'transcript') {
-      uploadDir = uploadDirs.transcript;
-    } else if (file.fieldname === 'certificate') {
-      uploadDir = uploadDirs.certificate;
-    } else if (file.fieldname === 'image') {
-      uploadDir = uploadDirs.eventphoto;
-    }
+  //   if (file.fieldname === 'profile') {
+  //     uploadDir = uploadDirs.profile;
+  //   } else if (file.fieldname === 'transcript') {
+  //     uploadDir = uploadDirs.transcript;
+  //   } else if (file.fieldname === 'certificate') {
+  //     uploadDir = uploadDirs.certificate;
+  //   } else if (file.fieldname === 'image') {
+  //     uploadDir = uploadDirs.eventphoto;
+  //   }
 
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + uuidv4();
-    const ext = path.extname(file.originalname);
-    const name = path.basename(file.originalname, ext).replace(/\s+/g, '_');
-    cb(null, `${name}-${uniqueSuffix}${ext}`);
-  }
+  //   cb(null, uploadDir);
+  // },
+  // filename: (req, file, cb) => {
+  //   const uniqueSuffix = Date.now() + '-' + uuidv4();
+  //   const ext = path.extname(file.originalname);
+  //   const name = path.basename(file.originalname, ext).replace(/\s+/g, '_');
+  //   cb(null, `${name}-${uniqueSuffix}${ext}`);
+  // }
 });
 
 const fileFilter = (req, file, cb) => {
@@ -115,14 +115,14 @@ const uploadFileLocal = (file, folder) => {
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || req.headers['Authorization'];
   console.log('Authorization header:', auth);
-  
+
   if (!auth) {
     return res.status(401).json({ message: 'Invalid token - no Authorization header' });
   }
 
   const parts = auth.trim().split(/\s+/);
   console.log('Authorization parts:', parts);
-  
+
   if (parts.length !== 2 || !/^Bearer$/i.test(parts[0])) {
     return res.status(401).json({ message: 'Invalid token - bad format' });
   }
@@ -310,7 +310,7 @@ app.post("/login/organizers", (req, res) => {
     }
 
     const user = rows[0];
-    
+
     if (password !== user.password) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
@@ -922,7 +922,7 @@ app.get("/event/organizer/:organizerId", (req, res) => {
 app.get("/getall/event/:id", (req, res) => {
   const { id } = req.params;
   const sql = "SELECT * FROM event WHERE organizer_id = ?";
-  
+
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error("Error fetching event:", err);
@@ -1080,7 +1080,7 @@ app.put("/event/edit/:id", upload.single('image'), (req, res) => {
     WHERE id = ?
   `;
 
-  const params = image 
+  const params = image
     ? [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, image, organizer_id || null, organizer_name || null, id]
     : [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, organizer_id || null, organizer_name || null, id];
 
@@ -1456,12 +1456,17 @@ const saveFileToCPanel = (file, subfolder) => {
 app.post(
   "/createport",
   verifyToken,
-  upload.fields([
-    { name: 'profile', maxCount: 1 },
-    { name: 'transcript', maxCount: 1 },
-    { name: 'certificate', maxCount: 20 }
-  ]),
+  upload.any(), // ← เปลี่ยนตรงนี้ก่อน
+
+  // upload.fields([
+  //   { name: 'profile', maxCount: 1 },
+  //   { name: 'transcript', maxCount: 1 },
+  //   { name: 'certificate', maxCount: 20 }
+  // ]),
   async (req, res) => {
+    console.log("=== FIELDS ===", req.files?.map(f => f.fieldname));
+    console.log("=== BODY KEYS ===", Object.keys(req.body));
+
     // ดึง Connection จาก Pool
     const connection = await db.promise().getConnection();
 
@@ -1490,24 +1495,35 @@ app.post(
         throw new Error("Missing user_id or port_id");
       }
 
+      const files = req.files || [];
+      const profileFile = files.find(f => f.fieldname === 'profile');
+      const transcriptFile = files.find(f => f.fieldname === 'transcript');
+      const certFiles = files.filter(f => f.fieldname === 'certificate');
+
+      let profileUrl = profileFile ? saveFileToCPanel(profileFile, 'profile') : null;
+      let transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript') : null;
+      let certificateUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates'));
+
+
+
       // --- 1. จัดการอัปโหลดไฟล์จริงลง Server ---
-      let profileUrl = null;
-      if (req.files?.profile?.[0]) {
-        profileUrl = saveFileToCPanel(req.files.profile[0], 'profile');
-      }
+      // let profileUrl = null;
+      // if (req.files?.profile?.[0]) {
+      //   profileUrl = saveFileToCPanel(req.files.profile[0], 'profile');
+      // }
 
-      let transcriptUrl = null;
-      if (req.files?.transcript?.[0]) {
-        transcriptUrl = saveFileToCPanel(req.files.transcript[0], 'transcript');
-      }
+      // let transcriptUrl = null;
+      // if (req.files?.transcript?.[0]) {
+      //   transcriptUrl = saveFileToCPanel(req.files.transcript[0], 'transcript');
+      // }
 
-      let certificateUrls = [];
-      if (req.files?.certificate?.length) {
-        for (const file of req.files.certificate) {
-          const url = saveFileToCPanel(file, 'certificates');
-          certificateUrls.push(url);
-        }
-      }
+      // let certificateUrls = [];
+      // if (req.files?.certificate?.length) {
+      //   for (const file of req.files.certificate) {
+      //     const url = saveFileToCPanel(file, 'certificates');
+      //     certificateUrls.push(url);
+      //   }
+      // }
 
       // --- 2. บันทึกลง Database (MySQL) ---
 
@@ -1770,7 +1786,7 @@ app.post('/upload/event-image', verifyToken, upload.single('image'), async (req,
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    
+
     const imageUrl = await uploadFileLocal(req.file, 'event');
     return res.json({ imageUrl });
   } catch (err) {
