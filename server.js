@@ -19,15 +19,15 @@ app.use(express.urlencoded({ extended: true }));
 
 // ================= UPLOAD FOLDERS =================
 const uploadDirs = {
-  profile: path.join(__dirname, '../public_html/uploads/profile'),
-  transcript: path.join(__dirname, 'public_html/uploads/transcript'),
-  certificate: path.join(__dirname, 'public_html/uploads/certificate'),
-  eventphoto: path.join(__dirname, 'public_html/uploads/eventphoto')
+  profile: path.join(__dirname, 'uploads/profile'),
+  transcript: path.join(__dirname, 'uploads/transcript'),
+  certificate: path.join(__dirname, 'uploads/certificate'),
+  eventphoto: path.join(__dirname, 'uploads/eventphoto')
 };
 
 
 // ================= MULTER STORAGE CONFIG =================
-const storage = multer.diskStorage({
+const storage = multer.memoryStorage({
   destination: (req, file, cb) => {
     // กำหนดโฟลเดอร์ตามชื่อ field
     let uploadDir = uploadDirs.profile; // default
@@ -76,7 +76,7 @@ const ALLOWED_TYPES = ["UNIVERSITY", "ORGANIZER"];
 
 // ========== DATABASE CONNECTION ==========
 const db = mysql.createPool({
-  host: "dailylifes.online",
+  host: "localhost",
   user: "zemrmpsz",
   password: "Etdit11@pim",
   database: "zemrmpsz_dailylifes",
@@ -115,14 +115,14 @@ const uploadFileLocal = (file, folder) => {
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || req.headers['Authorization'];
   console.log('Authorization header:', auth);
-
+  
   if (!auth) {
     return res.status(401).json({ message: 'Invalid token - no Authorization header' });
   }
 
   const parts = auth.trim().split(/\s+/);
   console.log('Authorization parts:', parts);
-
+  
   if (parts.length !== 2 || !/^Bearer$/i.test(parts[0])) {
     return res.status(401).json({ message: 'Invalid token - bad format' });
   }
@@ -202,7 +202,7 @@ app.post("/api/login", (req, res) => {
       return res.json({
         success: true,
         message: "Login Success",
-        user: { id: user.id, username: user.username, firstname: user.firstname, lastname: user.lastname, profile: user.profile_image || null },
+        user: { id: user.id, username: user.username, firstname: user.firstname, lastname: user.lastname, profile: user.profile_url || null },
         token: `${token}`
       });
     } else {
@@ -310,7 +310,7 @@ app.post("/login/organizers", (req, res) => {
     }
 
     const user = rows[0];
-
+    
     if (password !== user.password) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
@@ -922,7 +922,7 @@ app.get("/event/organizer/:organizerId", (req, res) => {
 app.get("/getall/event/:id", (req, res) => {
   const { id } = req.params;
   const sql = "SELECT * FROM event WHERE organizer_id = ?";
-
+  
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error("Error fetching event:", err);
@@ -1080,7 +1080,7 @@ app.put("/event/edit/:id", upload.single('image'), (req, res) => {
     WHERE id = ?
   `;
 
-  const params = image
+  const params = image 
     ? [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, image, organizer_id || null, organizer_name || null, id]
     : [activity_id, title, description || null, location || null, open_date || null, close_date || null, status || null, organizer_id || null, organizer_name || null, id];
 
@@ -1425,245 +1425,183 @@ app.get("/tables/size/all", (req, res) => {
   });
 });
 
-// ========== PORTFOLIO ENDPOINTS ==========
-// ใน server.js
-app.post('/createport', verifyToken, upload.single('profile_image'), async (req, res) => {
-  try {
-    const { portfolio_name } = req.body;
-    const userId = req.user.id;
-
-    let imagePath = null;
-
-    // ถ้ามีการอัปโหลดไฟล์ (Multer จะจัดการเซฟลงโฟลเดอร์ให้เอง)
-    if (req.file) {
-      // เก็บเฉพาะ "Path หรือชื่อไฟล์" เพื่อเอาไปใส่ใน DB
-      imagePath = `/uploads/profile/${req.file.filename}`;
-    }
-
-    // บันทึกลง Database (เก็บแค่ตัวอักษร Path ไม่ใช่ตัวไฟล์)
-    const sql = "UPDATE personal_info SET portfolio_name = ?, profile_url = ? WHERE user_id = ?";
-    db.query(sql, [portfolio_name, imagePath, userId], (err, result) => {
-      if (err) return res.status(500).json(err);
-      res.json({ message: "บันทึกสำเร็จ", path: imagePath });
-    });
-
-  } catch (error) {
-    res.status(500).json({ message: "Unexpected field หรือ Error อื่นๆ", error: error.message });
-  }
-});
 
 // ================= CREATE PORTFOLIO =================
 
-// app.post(
-//   "/createport",
-//   verifyToken,
-//   upload.fields([
-//     { name: 'profile', maxCount: 1 },
-//     { name: 'transcript', maxCount: 1 },
-//     { name: 'certificate', maxCount: 20 }
-//   ]),
-//   async (req, res) => {
+// ฟังก์ชัน Helper สำหรับย้ายไฟล์จาก Buffer ไปเก็บใน Folder ของ cPanel
+const saveFileToCPanel = (file, subfolder) => {
+  if (!file) return null;
 
-//     const connection = await db.promise().getConnection();
+  // กำหนด Path ให้ไปที่ public_html ของ Subdomain เพื่อให้เข้าถึงผ่านเว็บได้
+  // __dirname คือตำแหน่งของไฟล์ server.js (สมมติว่าอยู่ในโฟลเดอร์ api-node นอก public_html)
+  const targetDir = path.join(__dirname, '../public_html/api.dailylifes.online/uploads', subfolder);
 
-//     try {
-//       await connection.beginTransaction();
+  // สร้างโฟลเดอร์อัตโนมัติถ้ายังไม่มี
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
 
-//       // Parse JSON
-//       let parsedBody = req.body;
-//       if (typeof req.body.data === 'string') {
-//         parsedBody = JSON.parse(req.body.data);
-//       }
+  // ตั้งชื่อไฟล์ใหม่เพื่อป้องกันชื่อซ้ำ
+  const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(file.originalname)}`;
+  const filePath = path.join(targetDir, fileName);
 
-//       const {
-//         user_id,
-//         port_id,
-//         personal_info,
-//         educational,
-//         skills_abilities,
-//         activities_certificates,
-//         university_choice
-//       } = parsedBody;
+  // เขียนไฟล์ลงดิสก์
+  fs.writeFileSync(filePath, file.buffer);
 
-//       if (!user_id || !port_id) {
-//         return res.status(400).json({ success: false, message: "user_id และ port_id จำเป็นต้องมี" });
-//       }
+  // คืนค่า Path สั้นๆ สำหรับเก็บลง Database (เช่น /uploads/profile/123.jpg)
+  return `/uploads/${subfolder}/${fileName}`;
+};
 
-//       // ================= Upload Files =================
+// --- เริ่มต้น Route /createport ---
+app.post(
+  "/createport",
+  verifyToken,
+  upload.fields([
+    { name: 'profile', maxCount: 1 },
+    { name: 'transcript', maxCount: 1 },
+    { name: 'certificate', maxCount: 20 }
+  ]),
+  async (req, res) => {
+    // ดึง Connection จาก Pool
+    const connection = await db.promise().getConnection();
 
-//       let profileUrl = null;
-//       if (req.files?.profile?.[0]) {
-//         profileUrl = uploadFileLocal(req.files.profile[0], 'profile');
-//       }
+    try {
+      // เริ่ม Transaction (ถ้าพังจุดไหน จะไม่บันทึกเลยทั้งหมด)
+      await connection.beginTransaction();
 
-//       let transcriptUrl = null;
-//       if (req.files?.transcript?.[0]) {
-//         transcriptUrl = uploadFileLocal(req.files.transcript[0], 'transcript');
-//       }
+      // จัดการข้อมูล JSON ที่ส่งมาพร้อมกับไฟล์
+      let parsedBody = req.body;
+      if (typeof req.body.data === 'string') {
+        parsedBody = JSON.parse(req.body.data);
+      }
 
-//       let certificateUrls = [];
-//       if (req.files?.certificate?.length) {
-//         for (const file of req.files.certificate) {
-//           const url = uploadFileLocal(file, 'certificates');
-//           certificateUrls.push(url);
-//         }
-//       }
+      const {
+        user_id,
+        port_id,
+        personal_info,
+        educational,
+        skills_abilities,
+        activities_certificates,
+        university_choice
+      } = parsedBody;
 
-//       // ================= Insert portfolios =================
+      // Check ข้อมูลเบื้องต้น
+      if (!user_id || !port_id) {
+        throw new Error("Missing user_id or port_id");
+      }
 
-//       await connection.query(
-//         `INSERT INTO portfolios (user_id, port_id, profile_url)
-//          VALUES (?, ?, ?)`,
-//         [user_id, port_id, profileUrl]
-//       );
+      // --- 1. จัดการอัปโหลดไฟล์จริงลง Server ---
+      let profileUrl = null;
+      if (req.files?.profile?.[0]) {
+        profileUrl = saveFileToCPanel(req.files.profile[0], 'profile');
+      }
 
-//       // ================= personal_info =================
+      let transcriptUrl = null;
+      if (req.files?.transcript?.[0]) {
+        transcriptUrl = saveFileToCPanel(req.files.transcript[0], 'transcript');
+      }
 
-//       if (personal_info) {
-//         await connection.query(
-//           `INSERT INTO personal_info
-//           (port_id, portfolio_name, introduce, prefix, first_name, last_name, date_birth,
-//            nationality, national_id, phone_number1, phone_number2, email, address,
-//            province, district, subdistrict, postal_code)
-//           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-//           [
-//             port_id,
-//             personal_info.portfolio_name || null,
-//             personal_info.introduce || null,
-//             personal_info.prefix || null,
-//             personal_info.first_name || null,
-//             personal_info.last_name || null,
-//             personal_info.date_birth || null,
-//             personal_info.nationality || null,
-//             personal_info.national_id || null,
-//             personal_info.phone_number1 || null,
-//             personal_info.phone_number2 || null,
-//             personal_info.email || null,
-//             personal_info.address || null,
-//             personal_info.province || null,
-//             personal_info.district || null,
-//             personal_info.subdistrict || null,
-//             personal_info.postal_code || null
-//           ]
-//         );
-//       }
+      let certificateUrls = [];
+      if (req.files?.certificate?.length) {
+        for (const file of req.files.certificate) {
+          const url = saveFileToCPanel(file, 'certificates');
+          certificateUrls.push(url);
+        }
+      }
 
-//       // ================= educational =================
+      // --- 2. บันทึกลง Database (MySQL) ---
 
-//       if (Array.isArray(educational)) {
-//         for (const edu of educational) {
-//           await connection.query(
-//             `INSERT INTO educational
-//             (port_id, number, school, graduation, educational_qualifications,
-//              province, district, study_path, grade_average, study_results)
-//             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-//             [
-//               port_id,
-//               edu.number || null,
-//               edu.school || null,
-//               edu.graduation || null,
-//               edu.educational_qualifications || null,
-//               edu.province || null,
-//               edu.district || null,
-//               edu.study_path || null,
-//               edu.grade_average || null,
-//               transcriptUrl || null
-//             ]
-//           );
-//         }
-//       }
+      // ตารางหลัก: portfolios
+      await connection.query(
+        `INSERT INTO portfolios (user_id, port_id, profile_url) VALUES (?, ?, ?)`,
+        [user_id, port_id, profileUrl]
+      );
 
-//       // ================= skills_abilities =================
+      // ตาราง: personal_info
+      if (personal_info) {
+        await connection.query(
+          `INSERT INTO personal_info (port_id, portfolio_name, introduce, prefix, first_name, last_name, date_birth, nationality, national_id, phone_number1, phone_number2, email, address, province, district, subdistrict, postal_code)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [port_id, personal_info.portfolio_name, personal_info.introduce, personal_info.prefix, personal_info.first_name, personal_info.last_name, personal_info.date_birth, personal_info.nationality, personal_info.national_id, personal_info.phone_number1, personal_info.phone_number2, personal_info.email, personal_info.address, personal_info.province, personal_info.district, personal_info.subdistrict, personal_info.postal_code]
+        );
+      }
 
-//       if (skills_abilities) {
-//         const [skillRes] = await connection.query(
-//           `INSERT INTO skills_abilities (port_id, details)
-//            VALUES (?, ?)`,
-//           [port_id, skills_abilities.details || null]
-//         );
+      // ตาราง: educational
+      if (Array.isArray(educational)) {
+        for (const edu of educational) {
+          await connection.query(
+            `INSERT INTO educational (port_id, number, school, graduation, educational_qualifications, province, district, study_path, grade_average, study_results)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [port_id, edu.number, edu.school, edu.graduation, edu.educational_qualifications, edu.province, edu.district, edu.study_path, edu.grade_average, transcriptUrl]
+          );
+        }
+      }
 
-//         const skillsId = skillRes.insertId;
+      // ตาราง: skills_abilities และ language_skills
+      if (skills_abilities) {
+        const [skillRes] = await connection.query(
+          `INSERT INTO skills_abilities (port_id, details) VALUES (?, ?)`,
+          [port_id, skills_abilities.details]
+        );
+        const skillsId = skillRes.insertId;
 
-//         if (Array.isArray(skills_abilities.language_skills)) {
-//           for (const lang of skills_abilities.language_skills) {
-//             await connection.query(
-//               `INSERT INTO language_skills
-//                (port_id, skills_abilities_id, language, listening, speaking, reading, writing)
-//                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-//               [
-//                 port_id,
-//                 skillsId,
-//                 lang.language || null,
-//                 lang.listening || null,
-//                 lang.speaking || null,
-//                 lang.reading || null,
-//                 lang.writing || null
-//               ]
-//             );
-//           }
-//         }
-//       }
+        if (Array.isArray(skills_abilities.language_skills)) {
+          for (const lang of skills_abilities.language_skills) {
+            await connection.query(
+              `INSERT INTO language_skills (port_id, skills_abilities_id, language, listening, speaking, reading, writing)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [port_id, skillsId, lang.language, lang.listening, lang.speaking, lang.reading, lang.writing]
+            );
+          }
+        }
+      }
 
-//       // ================= activities_certificates (JSON) =================
+      // ตาราง: activities_certificates
+      if (Array.isArray(activities_certificates)) {
+        for (const activity of activities_certificates) {
+          await connection.query(
+            `INSERT INTO activities_certificates (port_id, number, name_project, date, photo, details)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [port_id, activity.number, activity.name_project, activity.date, JSON.stringify(certificateUrls), activity.details]
+          );
+        }
+      }
 
-//       if (Array.isArray(activities_certificates)) {
-//         for (const activity of activities_certificates) {
-//           await connection.query(
-//             `INSERT INTO activities_certificates
-//              (port_id, number, name_project, date, photo, details)
-//              VALUES (?, ?, ?, ?, ?, ?)`,
-//             [
-//               port_id,
-//               activity.number || null,
-//               activity.name_project || null,
-//               activity.date || null,
-//               JSON.stringify(certificateUrls),
-//               activity.details || null
-//             ]
-//           );
-//         }
-//       }
+      // ตาราง: university_choice
+      if (Array.isArray(university_choice)) {
+        for (const uni of university_choice) {
+          await connection.query(
+            `INSERT INTO university_choice (port_id, university, faculty, major, details)
+             VALUES (?, ?, ?, ?, ?)`,
+            [port_id, uni.university, uni.faculty, uni.major, uni.details]
+          );
+        }
+      }
 
-//       // ================= university_choice =================
+      // ยืนยันการบันทึกทั้งหมด
+      await connection.commit();
 
-//       if (Array.isArray(university_choice)) {
-//         for (const uni of university_choice) {
-//           await connection.query(
-//             `INSERT INTO university_choice
-//              (port_id, university, faculty, major, details)
-//              VALUES (?, ?, ?, ?, ?)`,
-//             [
-//               port_id,
-//               uni.university || null,
-//               uni.faculty || null,
-//               uni.major || null,
-//               uni.details || null
-//             ]
-//           );
-//         }
-//       }
+      res.status(200).json({
+        success: true,
+        message: "สร้าง Portfolio และอัปโหลดไฟล์เรียบร้อยแล้ว",
+        data: {
+          profile: profileUrl,
+          transcript: transcriptUrl,
+          certificates: certificateUrls
+        }
+      });
 
-//       await connection.commit();
-
-//       return res.json({
-//         success: true,
-//         message: "สร้าง Portfolio สำเร็จ",
-//         uploaded: {
-//           profile: profileUrl,
-//           transcript: transcriptUrl,
-//           certificates: certificateUrls
-//         }
-//       });
-
-//     } catch (err) {
-//       await connection.rollback();
-//       console.error("Create Portfolio Error:", err);
-//       return res.status(500).json({ success: false, error: err.message });
-//     } finally {
-//       connection.release();
-//     }
-//   }
-// );
+    } catch (err) {
+      // หากเกิด Error ให้ยกเลิกสิ่งที่ทำมาทั้งหมดใน DB
+      await connection.rollback();
+      console.error("❌ Create Portfolio Error:", err);
+      res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการสร้าง Portfolio", error: err.message });
+    } finally {
+      // คืน Connection กลับสู่ Pool
+      connection.release();
+    }
+  }
+);
 
 
 // ===== Get all data portfolio =======
@@ -1832,7 +1770,7 @@ app.post('/upload/event-image', verifyToken, upload.single('image'), async (req,
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-
+    
     const imageUrl = await uploadFileLocal(req.file, 'event');
     return res.json({ imageUrl });
   } catch (err) {
