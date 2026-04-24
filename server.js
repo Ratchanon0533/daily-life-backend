@@ -1010,6 +1010,45 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
   }
 });
 
+// ================= DELETE PORTFOLIO =================
+
+app.delete("/deleteport/:port_id", async (req, res) => {
+  const { port_id } = req.params;
+  if (!port_id) return res.status(400).json({ success: false, message: "port_id required" });
+
+  const connection = await db.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Delete child tables first (to avoid FK issues)
+    await connection.query(`DELETE FROM language_skills WHERE port_id = ?`, [port_id]);
+    await connection.query(`DELETE FROM skills_abilities WHERE port_id = ?`, [port_id]);
+    await connection.query(`DELETE FROM activities_certificates WHERE port_id = ?`, [port_id]);
+    await connection.query(`DELETE FROM educational WHERE port_id = ?`, [port_id]);
+    await connection.query(`DELETE FROM university_choice WHERE port_id = ?`, [port_id]);
+    await connection.query(`DELETE FROM personal_info WHERE port_id = ?`, [port_id]);
+
+    // Delete main portfolio row last
+    const [result] = await connection.query(`DELETE FROM portfolios WHERE port_id = ?`, [port_id]);
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "ไม่พบ Portfolio นี้" });
+    }
+
+    await connection.commit();
+    res.status(200).json({ success: true, message: "ลบ Portfolio เรียบร้อยแล้ว" });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("❌ Delete Portfolio Error:", err);
+    res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการลบ Portfolio", error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // ================= UPDATE PORTFOLIO =================
 
 app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
@@ -1074,8 +1113,8 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
       await connection.query(`DELETE FROM skills_abilities WHERE port_id = ?`, [port_id]);
 
       const [skillRes] = await connection.query(
-        `INSERT INTO skills_abilities (port_id, details, others) VALUES (?, ?, ?)`,
-        [port_id, skills_abilities.details, skills_abilities.others || null]
+        `INSERT INTO skills_abilities (port_id, details) VALUES (?, ?)`,
+        [port_id, skills_abilities.details]
       );
       const skillsId = skillRes.insertId;
 
@@ -1096,7 +1135,6 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
       const certUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates'));
       let certUrlIndex = 0;
       for (const activity of activities_certificates) {
-        // Use newly uploaded file URL, or existing photo_url string, or null
         let photoUrl = null;
         if (certUrls[certUrlIndex]) {
           photoUrl = certUrls[certUrlIndex++];
@@ -1141,7 +1179,7 @@ app.get("/getport/:userid", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT port_id, profile_url FROM Daily_Life_DB.portfolios WHERE user_id = ?", [userid]);
+    const [ports] = await pool.query("SELECT port_id, profile_url FROM portfolios WHERE user_id = ?", [userid]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", user_id: userid, portfolio_count: 0, data: [] });
 
@@ -1158,7 +1196,7 @@ app.get("/getpersonal_info/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT portfolio_name, introduce, prefix, first_name, last_name, date_birth, nationality, national_id, phone_number1, phone_number2, email, address, province, district, subdistrict, postal_code FROM Daily_Life_DB.personal_info WHERE port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT portfolio_name, introduce, prefix, first_name, last_name, date_birth, nationality, national_id, phone_number1, phone_number2, email, address, province, district, subdistrict, postal_code FROM personal_info WHERE port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
@@ -1175,7 +1213,7 @@ app.get("/geteducational/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT `number`, school, graduation, educational_qualifications, province, district, study_path, grade_average, study_results FROM Daily_Life_DB.educational WHERE port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT `number`, school, graduation, educational_qualifications, province, district, study_path, grade_average, study_results FROM educational WHERE port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
@@ -1192,7 +1230,7 @@ app.get("/getskills_abilities/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT s.id, s.port_id, s.details, l.skills_abilities_id, l.language, l.listening, l.speaking, l.reading, l.writing FROM Daily_Life_DB.skills_abilities s LEFT JOIN Daily_Life_DB.language_skills l ON s.id = l.skills_abilities_id WHERE s.port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT s.id, s.port_id, s.details, l.skills_abilities_id, l.language, l.listening, l.speaking, l.reading, l.writing FROM skills_abilities s LEFT JOIN language_skills l ON s.id = l.skills_abilities_id WHERE s.port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
@@ -1209,7 +1247,7 @@ app.get("/getactivities_certificates/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT id, port_id, `number`, name_project, `date`, photo, details FROM Daily_Life_DB.activities_certificates WHERE port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT id, port_id, `number`, name_project, `date`, photo, details FROM activities_certificates WHERE port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
@@ -1226,7 +1264,7 @@ app.get("/getuniversity_choice/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT id, port_id, university, faculty, major, details FROM Daily_Life_DB.university_choice WHERE port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT id, port_id, university, faculty, major, details FROM university_choice WHERE port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
