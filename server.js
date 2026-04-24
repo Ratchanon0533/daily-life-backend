@@ -1010,6 +1010,131 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
   }
 });
 
+// ================= UPDATE PORTFOLIO =================
+
+app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
+  const { port_id } = req.params;
+  if (!port_id) return res.status(400).json({ success: false, message: "port_id required" });
+
+  const connection = await db.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    let parsedBody = req.body;
+    if (typeof req.body.data === 'string') parsedBody = JSON.parse(req.body.data);
+
+    const { personal_info, educational, skills_abilities, activities_certificates, university_choice } = parsedBody;
+
+    const files = req.files || [];
+    const profileFile = files.find(f => f.fieldname === 'profile');
+    const transcriptFile = files.find(f => f.fieldname === 'transcript');
+    const certFiles = files.filter(f => f.fieldname === 'certificate');
+
+    // ===== Update profile image if new one uploaded =====
+    if (profileFile) {
+      const profileUrl = saveFileToCPanel(profileFile, 'profile');
+      await connection.query(`UPDATE portfolios SET profile_url = ? WHERE port_id = ?`, [profileUrl, port_id]);
+    } else if (personal_info?.profile_image_url) {
+      await connection.query(`UPDATE portfolios SET profile_url = ? WHERE port_id = ?`, [personal_info.profile_image_url, port_id]);
+    }
+
+    // ===== Update personal_info =====
+    if (personal_info) {
+      const [existing] = await connection.query(`SELECT port_id FROM personal_info WHERE port_id = ?`, [port_id]);
+      if (existing.length > 0) {
+        await connection.query(
+          `UPDATE personal_info SET portfolio_name=?, introduce=?, prefix=?, first_name=?, last_name=?, date_birth=?, nationality=?, national_id=?, phone_number1=?, phone_number2=?, email=?, address=?, province=?, district=?, subdistrict=?, postal_code=? WHERE port_id=?`,
+          [personal_info.portfolio_name, personal_info.introduce, personal_info.prefix, personal_info.first_name, personal_info.last_name, personal_info.date_birth, personal_info.nationality, personal_info.national_id, personal_info.phone_number1, personal_info.phone_number2, personal_info.email, personal_info.address, personal_info.province, personal_info.district, personal_info.subdistrict, personal_info.postal_code, port_id]
+        );
+      } else {
+        await connection.query(
+          `INSERT INTO personal_info (port_id, portfolio_name, introduce, prefix, first_name, last_name, date_birth, nationality, national_id, phone_number1, phone_number2, email, address, province, district, subdistrict, postal_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [port_id, personal_info.portfolio_name, personal_info.introduce, personal_info.prefix, personal_info.first_name, personal_info.last_name, personal_info.date_birth, personal_info.nationality, personal_info.national_id, personal_info.phone_number1, personal_info.phone_number2, personal_info.email, personal_info.address, personal_info.province, personal_info.district, personal_info.subdistrict, personal_info.postal_code]
+        );
+      }
+    }
+
+    // ===== Update educational (delete + re-insert) =====
+    if (Array.isArray(educational)) {
+      await connection.query(`DELETE FROM educational WHERE port_id = ?`, [port_id]);
+      const transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript') : null;
+      for (const edu of educational) {
+        const studyResults = transcriptUrl || (typeof edu.study_results === 'string' ? edu.study_results : null);
+        await connection.query(
+          `INSERT INTO educational (port_id, number, school, graduation, educational_qualifications, province, district, study_path, grade_average, study_results) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [port_id, edu.number, edu.school, edu.graduation, edu.educational_qualifications, edu.province, edu.district, edu.study_path, edu.grade_average, studyResults]
+        );
+      }
+    }
+
+    // ===== Update skills_abilities (delete + re-insert) =====
+    if (skills_abilities) {
+      await connection.query(`DELETE FROM language_skills WHERE port_id = ?`, [port_id]);
+      await connection.query(`DELETE FROM skills_abilities WHERE port_id = ?`, [port_id]);
+
+      const [skillRes] = await connection.query(
+        `INSERT INTO skills_abilities (port_id, details, others) VALUES (?, ?, ?)`,
+        [port_id, skills_abilities.details, skills_abilities.others || null]
+      );
+      const skillsId = skillRes.insertId;
+
+      if (Array.isArray(skills_abilities.language_skills)) {
+        for (const lang of skills_abilities.language_skills) {
+          if (!lang.language) continue;
+          await connection.query(
+            `INSERT INTO language_skills (port_id, skills_abilities_id, language, listening, speaking, reading, writing) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [port_id, skillsId, lang.language, lang.listening, lang.speaking, lang.reading, lang.writing]
+          );
+        }
+      }
+    }
+
+    // ===== Update activities_certificates (delete + re-insert) =====
+    if (Array.isArray(activities_certificates)) {
+      await connection.query(`DELETE FROM activities_certificates WHERE port_id = ?`, [port_id]);
+      const certUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates'));
+      let certUrlIndex = 0;
+      for (const activity of activities_certificates) {
+        // Use newly uploaded file URL, or existing photo_url string, or null
+        let photoUrl = null;
+        if (certUrls[certUrlIndex]) {
+          photoUrl = certUrls[certUrlIndex++];
+        } else if (typeof activity.photo === 'string') {
+          photoUrl = activity.photo;
+        } else if (typeof activity.photo_url === 'string') {
+          photoUrl = activity.photo_url;
+        }
+        await connection.query(
+          `INSERT INTO activities_certificates (port_id, number, name_project, date, photo, details) VALUES (?, ?, ?, ?, ?, ?)`,
+          [port_id, activity.number, activity.name_project, activity.date, photoUrl, activity.details]
+        );
+      }
+    }
+
+    // ===== Update university_choice (delete + re-insert) =====
+    if (Array.isArray(university_choice)) {
+      await connection.query(`DELETE FROM university_choice WHERE port_id = ?`, [port_id]);
+      for (const uni of university_choice) {
+        await connection.query(
+          `INSERT INTO university_choice (port_id, university, faculty, major, details) VALUES (?, ?, ?, ?, ?)`,
+          [port_id, uni.university, uni.faculty, uni.major, uni.details]
+        );
+      }
+    }
+
+    await connection.commit();
+    res.status(200).json({ success: true, message: "อัปเดต Portfolio เรียบร้อยแล้ว" });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("❌ Update Portfolio Error:", err);
+    res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการอัปเดต Portfolio", error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 app.get("/getport/:userid", async (req, res) => {
   const { userid } = req.params;
   if (!userid) return res.status(400).json({ success: false, message: "User id required" });
