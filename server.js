@@ -966,7 +966,7 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
     }
 
     if (skills_abilities) {
-      const [skillRes] = await connection.query(`INSERT INTO skills_abilities (port_id, details) VALUES (?, ?)`, [port_id, skills_abilities.details]);
+      const [skillRes] = await connection.query(`INSERT INTO skills_abilities (port_id, details, others) VALUES (?, ?, ?)`, [port_id, skills_abilities.details, skills_abilities.others || null]);
       const skillsId = skillRes.insertId;
 
       if (Array.isArray(skills_abilities.language_skills)) {
@@ -1113,8 +1113,8 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
       await connection.query(`DELETE FROM skills_abilities WHERE port_id = ?`, [port_id]);
 
       const [skillRes] = await connection.query(
-        `INSERT INTO skills_abilities (port_id, details) VALUES (?, ?)`,
-        [port_id, skills_abilities.details]
+        `INSERT INTO skills_abilities (port_id, details, others) VALUES (?, ?, ?)`,
+        [port_id, skills_abilities.details, skills_abilities.others || null]
       );
       const skillsId = skillRes.insertId;
 
@@ -1230,7 +1230,7 @@ app.get("/getskills_abilities/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT s.id, s.port_id, s.details, l.skills_abilities_id, l.language, l.listening, l.speaking, l.reading, l.writing FROM skills_abilities s LEFT JOIN language_skills l ON s.id = l.skills_abilities_id WHERE s.port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT s.id, s.port_id, s.details, s.others, l.skills_abilities_id, l.language, l.listening, l.speaking, l.reading, l.writing FROM skills_abilities s LEFT JOIN language_skills l ON s.id = l.skills_abilities_id WHERE s.port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
