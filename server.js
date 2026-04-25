@@ -78,7 +78,21 @@ db.getConnection((err, connection) => {
 });
 
 // ========== FILE UPLOAD HELPER (Local Storage) ==========
-const uploadFileLocal = (file, folder) => {
+// Resolves a base URL for uploaded files in this priority order:
+//   1. PUBLIC_BASE_URL env var (preferred for production)
+//   2. The host of the incoming request (req.protocol + req.get('host'))
+//   3. A safe default for development
+const resolveBaseUrl = (req) => {
+  const envBase = process.env.PUBLIC_BASE_URL;
+  if (envBase && envBase.trim() !== '') return envBase.replace(/\/+$/, '');
+  if (req && req.get) {
+    const host = req.get('host');
+    if (host) return `${req.protocol}://${host}`;
+  }
+  return 'https://api.dailylifes.online'; // last-resort fallback
+};
+
+const uploadFileLocal = (file, folder, req) => {
   if (!file) return null;
 
   const allowed = ['image/jpeg', 'image/png', 'image/webp'];
@@ -86,8 +100,21 @@ const uploadFileLocal = (file, folder) => {
     throw new Error('Invalid file type');
   }
 
-  const relativePath = `/uploads/${folder}/${file.filename}`;
-  return relativePath;
+  // Because multer is using memoryStorage, file.filename does NOT exist —
+  // we must generate one and write the buffer to disk ourselves.
+  const ext = path.extname(file.originalname || '') || '.jpg';
+  const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+
+  // Static files are served from <__dirname>/public_html/uploads (see app.use('/uploads', ...))
+  const targetDir = path.join(__dirname, 'public_html/uploads', folder);
+  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+  const filePath = path.join(targetDir, fileName);
+  fs.writeFileSync(filePath, file.buffer);
+
+  const relativePath = `/uploads/${folder}/${fileName}`;
+  const baseUrl = resolveBaseUrl(req);
+  return `${baseUrl}${relativePath}`;
 };
 
 // ========== JWT MIDDLEWARE ==========
@@ -694,7 +721,7 @@ app.post("/post/event", verifyToken, upload.single('image'), (req, res) => {
 
   let image_url = null;
   if (req.file) {
-    image_url = uploadFileLocal(req.file, 'event');
+    image_url = uploadFileLocal(req.file, 'event', req);
   }
 
   const getLastIdSQL = `SELECT activity_id FROM event ORDER BY activity_id DESC LIMIT 1`;
@@ -748,7 +775,7 @@ app.put("/event/edit/:id", upload.single('image'), (req, res) => {
   }
 
   let image = null;
-  if (req.file) image = uploadFileLocal(req.file, 'event');
+  if (req.file) image = uploadFileLocal(req.file, 'event', req);
 
   const sql = `
     UPDATE event 
@@ -909,7 +936,7 @@ app.get("/tables/size/all", (req, res) => {
 
 // ================= CREATE PORTFOLIO =================
 
-const saveFileToCPanel = (file, subfolder) => {
+const saveFileToCPanel = (file, subfolder, req) => {
   if (!file) return null;
 
   const targetDir = path.join(__dirname, '../public_html/api.dailylifes.online/uploads', subfolder);
@@ -919,7 +946,8 @@ const saveFileToCPanel = (file, subfolder) => {
   const filePath = path.join(targetDir, fileName);
   fs.writeFileSync(filePath, file.buffer);
 
-  return `/uploads/${subfolder}/${fileName}`;
+  const baseUrl = resolveBaseUrl(req);
+  return `${baseUrl}/uploads/${subfolder}/${fileName}`;
 };
 
 app.post("/createport", verifyToken, upload.any(), async (req, res) => {
@@ -943,9 +971,11 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
     const transcriptFile = files.find(f => f.fieldname === 'transcript');
     const certFiles = files.filter(f => f.fieldname === 'certificate');
 
-    let profileUrl = profileFile ? saveFileToCPanel(profileFile, 'profile') : null;
-    let transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript') : null;
-    let certificateUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates'));
+    let profileUrl = profileFile
+      ? saveFileToCPanel(profileFile, 'profile', req)
+      : (personal_info?.profile_image_url || null);
+    let transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript', req) : null;
+    let certificateUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates', req));
 
     await connection.query(`INSERT INTO portfolios (user_id, port_id, profile_url) VALUES (?, ?, ?)`, [user_id, port_id, profileUrl]);
 
@@ -958,9 +988,12 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
 
     if (Array.isArray(educational)) {
       for (const edu of educational) {
+        // Use multipart-uploaded URL if present, otherwise fall back to URL string in JSON payload
+        const eduStudyResults = transcriptUrl
+          || (typeof edu.study_results === 'string' && edu.study_results.trim() !== '' ? edu.study_results : null);
         await connection.query(
           `INSERT INTO educational (port_id, number, school, graduation, educational_qualifications, province, district, study_path, grade_average, study_results) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [port_id, edu.number, edu.school, edu.graduation, edu.educational_qualifications, edu.province, edu.district, edu.study_path, edu.grade_average, transcriptUrl]
+          [port_id, edu.number, edu.school, edu.graduation, edu.educational_qualifications, edu.province, edu.district, edu.study_path, edu.grade_average, eduStudyResults]
         );
       }
     }
@@ -980,10 +1013,18 @@ app.post("/createport", verifyToken, upload.any(), async (req, res) => {
     }
 
     if (Array.isArray(activities_certificates)) {
+      let certIdx = 0;
       for (const activity of activities_certificates) {
+        // Prefer multipart-uploaded URL (one per activity in order), otherwise the URL provided in JSON
+        const photoFromMultipart = certificateUrls[certIdx];
+        const photoFromJson = activity.photo_url || (typeof activity.photo === 'string' ? activity.photo : null);
+        const finalPhoto = photoFromMultipart || photoFromJson || null;
+        certIdx++;
+        // The photo column has a JSON CHECK constraint, so we must store JSON (array of URLs or null)
+        const photoJson = finalPhoto ? JSON.stringify([finalPhoto]) : null;
         await connection.query(
           `INSERT INTO activities_certificates (port_id, number, name_project, date, photo, details) VALUES (?, ?, ?, ?, ?, ?)`,
-          [port_id, activity.number, activity.name_project, activity.date, JSON.stringify(certificateUrls), activity.details]
+          [port_id, activity.number, activity.name_project, activity.date, photoJson, activity.details]
         );
       }
     }
@@ -1072,7 +1113,7 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
 
     // ===== Update profile image if new one uploaded =====
     if (profileFile) {
-      const profileUrl = saveFileToCPanel(profileFile, 'profile');
+      const profileUrl = saveFileToCPanel(profileFile, 'profile', req);
       await connection.query(`UPDATE portfolios SET profile_url = ? WHERE port_id = ?`, [profileUrl, port_id]);
     } else if (personal_info?.profile_image_url) {
       await connection.query(`UPDATE portfolios SET profile_url = ? WHERE port_id = ?`, [personal_info.profile_image_url, port_id]);
@@ -1097,7 +1138,7 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
     // ===== Update educational (delete + re-insert) =====
     if (Array.isArray(educational)) {
       await connection.query(`DELETE FROM educational WHERE port_id = ?`, [port_id]);
-      const transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript') : null;
+      const transcriptUrl = transcriptFile ? saveFileToCPanel(transcriptFile, 'transcript', req) : null;
       for (const edu of educational) {
         const studyResults = transcriptUrl || (typeof edu.study_results === 'string' ? edu.study_results : null);
         await connection.query(
@@ -1132,7 +1173,7 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
     // ===== Update activities_certificates (delete + re-insert) =====
     if (Array.isArray(activities_certificates)) {
       await connection.query(`DELETE FROM activities_certificates WHERE port_id = ?`, [port_id]);
-      const certUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates'));
+      const certUrls = certFiles.map(f => saveFileToCPanel(f, 'certificates', req));
       let certUrlIndex = 0;
       for (const activity of activities_certificates) {
         let photoUrl = null;
@@ -1143,9 +1184,11 @@ app.put("/updateport/:port_id", verifyToken, upload.any(), async (req, res) => {
         } else if (typeof activity.photo_url === 'string') {
           photoUrl = activity.photo_url;
         }
+        // photo column has a JSON CHECK constraint — store as JSON array (or null)
+        const photoJson = photoUrl ? JSON.stringify([photoUrl]) : null;
         await connection.query(
           `INSERT INTO activities_certificates (port_id, number, name_project, date, photo, details) VALUES (?, ?, ?, ?, ?, ?)`,
-          [port_id, activity.number, activity.name_project, activity.date, photoUrl, activity.details]
+          [port_id, activity.number, activity.name_project, activity.date, photoJson, activity.details]
         );
       }
     }
@@ -1196,7 +1239,7 @@ app.get("/getpersonal_info/:port_id", async (req, res) => {
 
   try {
     const pool = db.promise();
-    const [ports] = await pool.query("SELECT portfolio_name, introduce, prefix, first_name, last_name, date_birth, nationality, national_id, phone_number1, phone_number2, email, address, province, district, subdistrict, postal_code FROM personal_info WHERE port_id = ?", [port_id]);
+    const [ports] = await pool.query("SELECT pi.portfolio_name, pi.introduce, pi.prefix, pi.first_name, pi.last_name, pi.date_birth, pi.nationality, pi.national_id, pi.phone_number1, pi.phone_number2, pi.email, pi.address, pi.province, pi.district, pi.subdistrict, pi.postal_code, p.profile_url AS profile_image_url FROM personal_info pi LEFT JOIN portfolios p ON pi.port_id = p.port_id WHERE pi.port_id = ?", [port_id]);
 
     if (!ports || ports.length === 0) return res.json({ pulldata: "success", port_id, data: [] });
 
@@ -1280,7 +1323,7 @@ app.get("/getuniversity_choice/:port_id", async (req, res) => {
 app.post('/upload/event-image', verifyToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    const imageUrl = await uploadFileLocal(req.file, 'event');
+    const imageUrl = await uploadFileLocal(req.file, 'event', req);
     return res.json({ imageUrl });
   } catch (err) {
     console.error('Upload error:', err);
@@ -1291,7 +1334,7 @@ app.post('/upload/event-image', verifyToken, upload.single('image'), async (req,
 app.post('/upload/transcript', verifyToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    const imageUrl = uploadFileLocal(req.file, 'transcript');
+    const imageUrl = uploadFileLocal(req.file, 'transcript', req);
     return res.json({ imageUrl });
   } catch (err) {
     console.error('Upload error:', err);
@@ -1302,7 +1345,7 @@ app.post('/upload/transcript', verifyToken, upload.single('image'), async (req, 
 app.post('/upload/profile', verifyToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    const imageUrl = uploadFileLocal(req.file, 'profile');
+    const imageUrl = uploadFileLocal(req.file, 'profile', req);
     return res.json({ imageUrl });
   } catch (err) {
     console.error('Upload error:', err);
@@ -1313,7 +1356,7 @@ app.post('/upload/profile', verifyToken, upload.single('image'), async (req, res
 app.post('/upload/certificate', verifyToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    const imageUrl = uploadFileLocal(req.file, 'certificates');
+    const imageUrl = uploadFileLocal(req.file, 'certificates', req);
     return res.json({ imageUrl });
   } catch (err) {
     console.error('Upload error:', err);
